@@ -25,6 +25,34 @@ export class DebtService {
   async createDebt(createDto: CreateDebtDto, userId: number) {
     const { type, total_amount, customer_name, supplier_name, note } = createDto;
 
+    if (type === 'CUSTOMER' && customer_name?.trim()) {
+      const activeDebt = await this.prisma.debt.findFirst({
+        where: {
+          type: 'CUSTOMER',
+          customer_name: { equals: customer_name.trim(), mode: 'insensitive' },
+          status: { in: ['BELUM_LUNAS', 'SEBAGIAN'] },
+        },
+      });
+
+      if (activeDebt) {
+        const updated = await this.prisma.debt.update({
+          where: { id: activeDebt.id },
+          data: {
+            total_amount: activeDebt.total_amount + total_amount,
+            remaining_amount: activeDebt.remaining_amount + total_amount,
+            status: activeDebt.paid_amount > 0 ? 'SEBAGIAN' : 'BELUM_LUNAS',
+            note: note ? `${activeDebt.note || ''}; ${note}` : activeDebt.note,
+          },
+        });
+
+        return {
+          success: true,
+          message: `Hutang untuk ${customer_name} berhasil ditambahkan ke catatan berjalan`,
+          data: updated,
+        };
+      }
+    }
+
     const debt = await this.prisma.debt.create({
       data: {
         type,
@@ -66,7 +94,7 @@ export class DebtService {
       ];
     }
 
-    const [data, total] = await Promise.all([
+    const [rawDebts, total] = await Promise.all([
       this.prisma.debt.findMany({
         where,
         skip,
@@ -74,11 +102,48 @@ export class DebtService {
         orderBy: { created_at: 'desc' },
         include: {
           user: { select: { id: true, fullname: true } },
-          pesanan: { select: { id: true, nomor_pesanan: true, status: true } },
+          pesanan: {
+            include: {
+              detail_pesanan: true,
+            },
+          },
         },
       }),
       this.prisma.debt.count({ where }),
     ]);
+
+    // Enrich debts with detail items from all related pesanan
+    const data = await Promise.all(
+      rawDebts.map(async (debt) => {
+        let pesanan_list = [];
+        if (debt.customer_name) {
+          pesanan_list = await this.prisma.pesanan.findMany({
+            where: {
+              nama_pelanggan: { equals: debt.customer_name, mode: 'insensitive' },
+              ...(debt.status === 'LUNAS' ? {} : { status: 'hutang' }),
+            },
+            include: { detail_pesanan: true },
+            orderBy: { created_at: 'desc' },
+          });
+        } else if (debt.pesanan) {
+          pesanan_list = [debt.pesanan];
+        }
+
+        const detail_items = pesanan_list.flatMap((p) =>
+          (p.detail_pesanan || []).map((d) => ({
+            ...d,
+            nomor_pesanan: p.nomor_pesanan,
+            tanggal: p.created_at,
+          })),
+        );
+
+        return {
+          ...debt,
+          pesanan_list,
+          detail_items,
+        };
+      }),
+    );
 
     return {
       success: true,
@@ -92,13 +157,17 @@ export class DebtService {
       where: { id },
       include: {
         user: { select: { id: true, fullname: true } },
-        pesanan: true,
+        pesanan: {
+          include: {
+            detail_pesanan: true,
+          },
+        },
         payments: {
           orderBy: { paid_at: 'desc' },
           include: {
             user: { select: { id: true, fullname: true } },
             transaksi_keuangan: true,
-          }
+          },
         },
       },
     });
@@ -107,10 +176,36 @@ export class DebtService {
       throw new NotFoundException('Data hutang tidak ditemukan');
     }
 
+    let pesanan_list = [];
+    if (debt.customer_name) {
+      pesanan_list = await this.prisma.pesanan.findMany({
+        where: {
+          nama_pelanggan: { equals: debt.customer_name, mode: 'insensitive' },
+          ...(debt.status === 'LUNAS' ? {} : { status: 'hutang' }),
+        },
+        include: { detail_pesanan: true },
+        orderBy: { created_at: 'desc' },
+      });
+    } else if (debt.pesanan) {
+      pesanan_list = [debt.pesanan];
+    }
+
+    const detail_items = pesanan_list.flatMap((p) =>
+      (p.detail_pesanan || []).map((d) => ({
+        ...d,
+        nomor_pesanan: p.nomor_pesanan,
+        tanggal: p.created_at,
+      })),
+    );
+
     return {
       success: true,
       message: 'Detail hutang berhasil diambil',
-      data: debt,
+      data: {
+        ...debt,
+        pesanan_list,
+        detail_items,
+      },
     };
   }
 
@@ -211,15 +306,21 @@ export class DebtService {
         },
       });
 
-      if (debt.id_pesanan) {
-        let pesananStatus: 'belum_bayar' | 'lunas' | 'hutang' = 'hutang';
-        if (new_status === 'LUNAS') {
-          pesananStatus = 'lunas';
+      if (new_status === 'LUNAS') {
+        if (debt.customer_name) {
+          await tx.pesanan.updateMany({
+            where: {
+              nama_pelanggan: { equals: debt.customer_name, mode: 'insensitive' },
+              status: 'hutang',
+            },
+            data: { status: 'lunas' },
+          });
+        } else if (debt.id_pesanan) {
+          await tx.pesanan.update({
+            where: { id: debt.id_pesanan },
+            data: { status: 'lunas' },
+          });
         }
-        await tx.pesanan.update({
-          where: { id: debt.id_pesanan },
-          data: { status: pesananStatus },
-        });
       }
 
       // 6. Buat financial record depending on debt type

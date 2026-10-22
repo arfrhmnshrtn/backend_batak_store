@@ -1,7 +1,7 @@
 services:
   app:
     image: node:22
-    container_name: app_angkringan
+    container_name: app_batak_store
     working_dir: /app
     volumes:
       - .:/app
@@ -15,12 +15,12 @@ services:
 
   db:
     image: postgres:15
-    container_name: db_angkringan
+    container_name: db_batak_store
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: arief140105
-      POSTGRES_DB: db_angkringan
+      POSTGRES_DB: db_batak_store
     volumes:
       - postgres_data:/var/lib/postgresql/data
 

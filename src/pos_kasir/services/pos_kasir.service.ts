@@ -130,21 +130,43 @@ export class PosKasirService {
           },
         });
       } else if (finalStatus === 'hutang') {
-        // Create debt record
-        await tx.debt.create({
-          data: {
+        const customerName = nama_pelanggan?.trim() || `Pelanggan POS ${nomor_pesanan}`;
+
+        // Cari hutang aktif (BELUM_LUNAS / SEBAGIAN) untuk nama pelanggan yang sama
+        const activeDebt = await tx.debt.findFirst({
+          where: {
             type: 'CUSTOMER',
-            customer_name:
-              nama_pelanggan || `Pelanggan POS ${nomor_pesanan}`,
-            note: 'Otomatis dari transaksi POS',
-            total_amount: total_harga,
-            paid_amount: 0,
-            remaining_amount: total_harga,
-            status: 'BELUM_LUNAS',
-            id_pesanan: pesanan.id,
-            created_by: userId,
+            customer_name: { equals: customerName, mode: 'insensitive' },
+            status: { in: ['BELUM_LUNAS', 'SEBAGIAN'] },
           },
         });
+
+        if (activeDebt) {
+          // Tambahkan ke hutang yang sudah ada
+          await tx.debt.update({
+            where: { id: activeDebt.id },
+            data: {
+              total_amount: activeDebt.total_amount + total_harga,
+              remaining_amount: activeDebt.remaining_amount + total_harga,
+              status: activeDebt.paid_amount > 0 ? 'SEBAGIAN' : 'BELUM_LUNAS',
+            },
+          });
+        } else {
+          // Buat record hutang baru jika belum ada hutang aktif
+          await tx.debt.create({
+            data: {
+              type: 'CUSTOMER',
+              customer_name: customerName,
+              note: 'Otomatis dari transaksi POS',
+              total_amount: total_harga,
+              paid_amount: 0,
+              remaining_amount: total_harga,
+              status: 'BELUM_LUNAS',
+              id_pesanan: pesanan.id,
+              created_by: userId,
+            },
+          });
+        }
       }
 
       return {
@@ -351,21 +373,40 @@ export class PosKasirService {
         });
 
         if (!existDebt) {
-          await tx.debt.create({
-            data: {
+          const customerName = pesanan.nama_pelanggan?.trim() || `Pelanggan POS ${pesanan.nomor_pesanan}`;
+
+          const activeDebt = await tx.debt.findFirst({
+            where: {
               type: 'CUSTOMER',
-              customer_name:
-                pesanan.nama_pelanggan ||
-                `Pelanggan POS ${pesanan.nomor_pesanan}`,
-              note: 'Otomatis dari transaksi POS',
-              total_amount: pesanan.total_harga,
-              paid_amount: 0,
-              remaining_amount: pesanan.total_harga,
-              status: 'BELUM_LUNAS',
-              id_pesanan: pesanan.id,
-              created_by: userId,
+              customer_name: { equals: customerName, mode: 'insensitive' },
+              status: { in: ['BELUM_LUNAS', 'SEBAGIAN'] },
             },
           });
+
+          if (activeDebt) {
+            await tx.debt.update({
+              where: { id: activeDebt.id },
+              data: {
+                total_amount: activeDebt.total_amount + pesanan.total_harga,
+                remaining_amount: activeDebt.remaining_amount + pesanan.total_harga,
+                status: activeDebt.paid_amount > 0 ? 'SEBAGIAN' : 'BELUM_LUNAS',
+              },
+            });
+          } else {
+            await tx.debt.create({
+              data: {
+                type: 'CUSTOMER',
+                customer_name: customerName,
+                note: 'Otomatis dari transaksi POS',
+                total_amount: pesanan.total_harga,
+                paid_amount: 0,
+                remaining_amount: pesanan.total_harga,
+                status: 'BELUM_LUNAS',
+                id_pesanan: pesanan.id,
+                created_by: userId,
+              },
+            });
+          }
         }
       }
 
