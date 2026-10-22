@@ -1,13 +1,14 @@
+
 services:
   app:
-    image: node:22
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: app_batak_store
+    restart: unless-stopped
     working_dir: /app
-    volumes:
-      - .:/app
     ports:
-      - '3000:3000'
-    command: sh -c "npm install && npx prisma generate && npm run start:dev"
+      - "3000:3000"
     env_file:
       - .env
     depends_on:
@@ -16,10 +17,10 @@ services:
   db:
     image: postgres:15
     container_name: db_batak_store
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: arief140105
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: db_batak_store
     volumes:
       - postgres_data:/var/lib/postgresql/data
