@@ -1,0 +1,3 @@
+# Folder ini dikelola oleh aplikasi untuk menyimpan foto katalog menu.
+# File gambar yang diunggah tidak disimpan di git (dikecualikan di .gitignore).
+# Folder ini tetap dipertahankan di repository menggunakan file .gitkeep ini.

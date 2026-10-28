@@ -400,3 +400,9 @@ dist
 .serverless/**/*.zip
 
 /generated/prisma
+
+# Uploaded files (user-generated content - do not commit)
+uploads/**/!(*.gitkeep)
+!uploads/
+!uploads/katalog-menu/
+!uploads/katalog-menu/.gitkeep
